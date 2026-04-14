@@ -242,7 +242,7 @@ def _request_json(method: str, url: str, *, headers: dict, timeout: int, json_bo
                 _sleep_before_retry(attempt)
                 continue
 
-            raise RuntimeError(f"API error {resp.status_code}: {_response_text_preview(resp)}")
+            raise RuntimeError(f"API error {resp.status_code} at {url}: {_response_text_preview(resp)}")
         except (ReadTimeout, Timeout, ConnectionError, RequestException) as e:
             last_error = e
             if attempt < attempts:
