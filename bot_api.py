@@ -1428,33 +1428,6 @@ def touch_job_heartbeat(job_id: str, debug_last_step=None):
     return update_job(job_id, payload)
 
 
-# ---- Edge Function warmup / keepalive ----
-# Supabase Edge Functions return intermittent 405 on cold starts.
-# This pings critical functions every heartbeat cycle to keep them warm.
-
-WARMUP_FUNCTIONS = [
-    UPLOAD_BOT_SCREENSHOT_URL,
-    SUBMIT_BOT_EVIDENCE_URL,
-    CLAIM_NEXT_JOB_URL,
-    HEARTBEAT_URL,
-]
-
-def warmup_edge_functions():
-    """Fire-and-forget lightweight pings to keep Edge Functions warm."""
-    for url in WARMUP_FUNCTIONS:
-        if not url:
-            continue
-        try:
-            requests.post(
-                url,
-                headers=bot_function_headers(),
-                json={"warmup": True},
-                timeout=5,
-            )
-        except Exception:
-            pass  # warmup is best-effort, never crash
-
-
 def update_recipe_debug(recipe_id: str, debug_log_append=None, debug_screenshot_url=None):
     payload = {}
     if debug_screenshot_url is not None:
