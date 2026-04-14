@@ -47,7 +47,9 @@ HEADLESS = os.getenv("HEADLESS", "true").strip().lower() == "true"
 PAGE_HTML_MAX_LEN = 20000
 
 PI_ANALYZER_BUILD = os.getenv("PI_ANALYZER_BUILD", "pi-runtime-pilot-2026-03-25a").strip() or "pi-runtime-pilot-2026-03-25a"
-DEFAULT_BASE44_APP_ID = os.getenv("BASE44_APP_ID", "69ad9b8c06689adb44280cf2").strip() or "69ad9b8c06689adb44280cf2"
+SUPABASE_FUNCTIONS_URL = os.getenv("SUPABASE_URL", "").strip()
+if SUPABASE_FUNCTIONS_URL:
+    SUPABASE_FUNCTIONS_URL = f"{SUPABASE_FUNCTIONS_URL}/functions/v1"
 ANALYZER_RUNTIME_INTERNAL_SECRET = (
     os.getenv("ANALYZER_RUNTIME_INTERNAL_SECRET", "").strip()
     or os.getenv("SCRAPER_SHARED_SECRET", "").strip()
@@ -186,23 +188,13 @@ def resolve_analyzer_runtime_function_url() -> tuple[str, str]:
             if derived:
                 return derived, f"derived:{env_name}"
 
-    app_id_candidates = []
-    for env_name in ("BASE44_APP_ID", "APP_ID", "BASE44_PROJECT_ID"):
-        value = os.getenv(env_name, "").strip()
-        if value:
-            app_id_candidates.append((value, f"env:{env_name}"))
-    if DEFAULT_BASE44_APP_ID:
-        app_id_candidates.append((DEFAULT_BASE44_APP_ID, "default:BASE44_APP_ID"))
+    # Fallback: derive from SUPABASE_URL
+    if SUPABASE_FUNCTIONS_URL:
+        return f"{SUPABASE_FUNCTIONS_URL}/getAnalyzerRuntime", "derived:SUPABASE_URL"
 
-    seen_app_ids = set()
-    for app_id, source in app_id_candidates:
-        if not app_id or app_id in seen_app_ids:
-            continue
-        seen_app_ids.add(app_id)
-        production_url = "https://susheff.com/functions/getAnalyzerRuntime"
-        return production_url, f"production:{source}"
-
-    return "", "missing"
+    # Legacy fallback: try production domain
+    production_url = "https://susheff.com/functions/getAnalyzerRuntime"
+    return production_url, "production:fallback"
 
 
 ANALYZER_RUNTIME_FUNCTION_URL, ANALYZER_RUNTIME_FUNCTION_URL_SOURCE = resolve_analyzer_runtime_function_url()
@@ -9818,7 +9810,7 @@ async def apply_visual_recipe_image_after_analysis(job_id: str, recipe_id: str, 
         )
         return
 
-    looks_like_uploaded_debug_image = "base44.app/api/apps/" in str(current_image_url or "")
+    looks_like_uploaded_debug_image = "base44.app/api/apps/" in str(current_image_url or "") or "supabase.co/storage/" in str(current_image_url or "")
     should_replace = not current_image_url or looks_like_uploaded_debug_image or current_image_url == primary_screenshot_url
 
     if not should_replace:

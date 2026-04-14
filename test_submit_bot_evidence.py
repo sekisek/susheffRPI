@@ -18,7 +18,7 @@ resp = requests.post(
         "job_id": "69af6cecd096c787cf0f81be",
         "recipe_id": "69af6c6cc8b3349ba6b347a9",
         "target_url": "https://www.instagram.com/p/DVba2rhDAT0/",
-        "screenshot_url": "https://base44.app/api/apps/69ad9b8c06689adb44280cf2/files/public/69ad9b8c06689adb44280cf2/e93420c54_69af6cecd096c787cf0f81be.png",
+        "screenshot_url": "https://vebycomimqavfdiamhsw.supabase.co/storage/v1/object/public/screenshots/test.png",
         "raw_page_text": "test",
         "page_title": "Instagram",
         "media_type_guess": "image",

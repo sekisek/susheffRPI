@@ -8,6 +8,7 @@ load_dotenv("/home/bamanio/social-bot/.env")
 
 HEARTBEAT_URL = os.getenv("HEARTBEAT_URL", "").strip()
 BOT_SECRET = os.getenv("BOT_SECRET", "").strip()
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
 DEVICE_NAME = os.getenv("DEVICE_NAME", "").strip() or socket.gethostname()
 
 PHONE_WORKER_ENABLED = os.getenv("PHONE_WORKER_ENABLED", "").strip().lower() in {
@@ -130,12 +131,16 @@ message = (
     f"{phone_message}"
 )
 
+heartbeat_headers = {
+    "Content-Type": "application/json",
+    "x-bot-secret": BOT_SECRET,
+}
+if SUPABASE_ANON_KEY:
+    heartbeat_headers["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
+
 resp = requests.post(
     HEARTBEAT_URL,
-    headers={
-        "Content-Type": "application/json",
-        "x-bot-secret": BOT_SECRET,
-    },
+    headers=heartbeat_headers,
     json={
         "device_name": DEVICE_NAME,
         "status": status,

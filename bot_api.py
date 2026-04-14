@@ -19,19 +19,70 @@ SUBMIT_BOT_EVIDENCE_URL = os.getenv("SUBMIT_BOT_EVIDENCE_URL", "").strip()
 HEARTBEAT_URL = os.getenv("HEARTBEAT_URL", "").strip()
 CLAIM_NEXT_JOB_URL = os.getenv("CLAIM_NEXT_JOB_URL", "").strip()
 
-APP_ID = os.getenv("BASE44_APP_ID", "").strip()
-if not APP_ID:
-    raise RuntimeError("Missing BASE44_APP_ID in .env")
+# ---- Supabase config (replaces Base44 entity API) ----
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
 
-ENTITY_BASE_URL = f"https://app.base44.com/api/apps/{APP_ID}/entities"
-BOTJOB_URL = f"{ENTITY_BASE_URL}/BotJob"
-RECIPE_URL = f"{ENTITY_BASE_URL}/Recipe"
-BOTALERT_URL = f"{ENTITY_BASE_URL}/BotAlert"
+if not SUPABASE_URL:
+    raise RuntimeError("Missing SUPABASE_URL in .env")
+if not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("Missing SUPABASE_SERVICE_ROLE_KEY in .env")
 
-INVESTIGATION_RUN_URL = f"{ENTITY_BASE_URL}/InvestigationRun"
-INVESTIGATION_BREADCRUMB_URL = f"{ENTITY_BASE_URL}/InvestigationBreadcrumb"
-INVESTIGATION_CANDIDATE_SNAPSHOT_URL = f"{ENTITY_BASE_URL}/InvestigationCandidateSnapshot"
-INVESTIGATION_EVIDENCE_SNAPSHOT_URL = f"{ENTITY_BASE_URL}/InvestigationEvidenceSnapshot"
+SUPABASE_REST_URL = f"{SUPABASE_URL}/rest/v1"
+
+# Base44 entity name → Supabase table name
+ENTITY_TABLE_MAP = {
+    "BotJob": "bot_jobs",
+    "Recipe": "recipes",
+    "BotAlert": "bot_alerts",
+    "InvestigationRun": "investigation_runs",
+    "InvestigationBreadcrumb": "investigation_breadcrumbs",
+    "InvestigationCandidateSnapshot": "investigation_candidate_snapshots",
+    "InvestigationEvidenceSnapshot": "investigation_evidence_snapshots",
+    "BotDeviceStatus": "bot_device_statuses",
+    "RecipeTranslation": "recipe_translations",
+    "ShareRecord": "share_records",
+    "Settings": "settings",
+    "ImportCorrectionLog": "import_correction_logs",
+    "DiscoverySource": "discovery_sources",
+    "DiscoveryCandidate": "discovery_candidates",
+    "DiscoveryBlockRule": "discovery_block_rules",
+    "DiscoverySetting": "discovery_settings",
+    "DiscoveryRun": "discovery_runs",
+    "SourceCreator": "source_creators",
+    "SourceChannel": "source_channels",
+    "RecipeReviewAnnotation": "recipe_review_annotations",
+    "FriendlyOutreachRequest": "friendly_outreach_requests",
+}
+
+import re as _re_entity
+
+def _entity_table_name(entity_name: str) -> str:
+    """Convert Base44 entity name (e.g. 'BotJob') to Supabase table name (e.g. 'bot_jobs')."""
+    name = str(entity_name or "").strip()
+    if name in ENTITY_TABLE_MAP:
+        return ENTITY_TABLE_MAP[name]
+    # Fallback: CamelCase → snake_case + simple pluralize
+    snake = _re_entity.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+    if not snake.endswith('s'):
+        snake += 's'
+    return snake
+
+def _unwrap_supabase_response(result):
+    """Supabase REST returns arrays; unwrap single-item arrays to a dict."""
+    if isinstance(result, list):
+        return result[0] if result else {}
+    return result
+
+BOTJOB_URL = f"{SUPABASE_REST_URL}/bot_jobs"
+RECIPE_URL = f"{SUPABASE_REST_URL}/recipes"
+BOTALERT_URL = f"{SUPABASE_REST_URL}/bot_alerts"
+
+INVESTIGATION_RUN_URL = f"{SUPABASE_REST_URL}/investigation_runs"
+INVESTIGATION_BREADCRUMB_URL = f"{SUPABASE_REST_URL}/investigation_breadcrumbs"
+INVESTIGATION_CANDIDATE_SNAPSHOT_URL = f"{SUPABASE_REST_URL}/investigation_candidate_snapshots"
+INVESTIGATION_EVIDENCE_SNAPSHOT_URL = f"{SUPABASE_REST_URL}/investigation_evidence_snapshots"
 
 INVESTIGATION_HISTORY_ENABLED = os.getenv("INVESTIGATION_HISTORY_ENABLED", "true").strip().lower() == "true"
 INVESTIGATION_HISTORY_SUPPORTED_MODES = {
@@ -145,7 +196,7 @@ def utc_now_iso():
 
 def _checked_json_response(resp):
     if not resp.ok:
-        raise RuntimeError(f"Base44 API error {resp.status_code}: {resp.text[:2000]}")
+        raise RuntimeError(f"API error {resp.status_code}: {resp.text[:2000]}")
     return resp.json()
 
 
@@ -191,22 +242,22 @@ def _request_json(method: str, url: str, *, headers: dict, timeout: int, json_bo
                 _sleep_before_retry(attempt)
                 continue
 
-            raise RuntimeError(f"Base44 API error {resp.status_code}: {_response_text_preview(resp)}")
+            raise RuntimeError(f"API error {resp.status_code}: {_response_text_preview(resp)}")
         except (ReadTimeout, Timeout, ConnectionError, RequestException) as e:
             last_error = e
             if attempt < attempts:
                 _sleep_before_retry(attempt)
                 continue
             raise RuntimeError(
-                f"Base44 request failed after {attempt} attempts: {type(e).__name__}: {e}"
+                f"API request failed after {attempt} attempts: {type(e).__name__}: {e}"
             )
 
     if last_response is not None:
         raise RuntimeError(
-            f"Base44 API error {last_response.status_code}: {_response_text_preview(last_response)}"
+            f"API error {last_response.status_code}: {_response_text_preview(last_response)}"
         )
 
-    raise RuntimeError(f"Base44 request failed: {last_error}")
+    raise RuntimeError(f"API request failed: {last_error}")
 
 
 def _as_plain_dict(value):
@@ -718,35 +769,54 @@ def _merge_debug_data(existing, incoming):
 
 
 def api_headers():
-    if not API_KEY:
-        raise RuntimeError("Missing API_KEY in .env")
-    return {"api_key": API_KEY, "Content-Type": "application/json"}
+    return {
+        "apikey": SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
 
 
 def bot_function_headers():
     if not BOT_SECRET:
         raise RuntimeError("Missing BOT_SECRET in .env")
-    return {"Content-Type": "application/json", "x-bot-secret": BOT_SECRET}
+    headers = {"Content-Type": "application/json", "x-bot-secret": BOT_SECRET}
+    # Supabase Edge Functions require Authorization header
+    if SUPABASE_ANON_KEY:
+        headers["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
+    return headers
 
 
 def get_job(job_id: str):
-    return _request_json("GET", f"{BOTJOB_URL}/{job_id}", headers=api_headers(), timeout=30)
+    result = _request_json("GET", f"{BOTJOB_URL}?id=eq.{job_id}&select=*", headers=api_headers(), timeout=30)
+    if isinstance(result, list):
+        if not result:
+            raise RuntimeError(f"BotJob not found: {job_id}")
+        return result[0]
+    return result
 
 
 def update_job(job_id: str, payload: dict):
-    return _request_json("PUT", f"{BOTJOB_URL}/{job_id}", headers=api_headers(), json_body=payload, timeout=30)
+    result = _request_json("PATCH", f"{BOTJOB_URL}?id=eq.{job_id}", headers=api_headers(), json_body=payload, timeout=30)
+    return _unwrap_supabase_response(result)
 
 
 def get_recipe(recipe_id: str):
-    return _request_json("GET", f"{RECIPE_URL}/{recipe_id}", headers=api_headers(), timeout=30)
+    result = _request_json("GET", f"{RECIPE_URL}?id=eq.{recipe_id}&select=*", headers=api_headers(), timeout=30)
+    if isinstance(result, list):
+        if not result:
+            raise RuntimeError(f"Recipe not found: {recipe_id}")
+        return result[0]
+    return result
 
 
 def update_recipe(recipe_id: str, payload: dict):
-    return _request_json("PUT", f"{RECIPE_URL}/{recipe_id}", headers=api_headers(), json_body=payload, timeout=30)
+    result = _request_json("PATCH", f"{RECIPE_URL}?id=eq.{recipe_id}", headers=api_headers(), json_body=payload, timeout=30)
+    return _unwrap_supabase_response(result)
 
 
 def _entity_collection_url(entity_name: str) -> str:
-    return f"{ENTITY_BASE_URL}/{entity_name}"
+    return f"{SUPABASE_REST_URL}/{_entity_table_name(entity_name)}"
 
 
 def entity_url(entity_name: str):
@@ -754,13 +824,14 @@ def entity_url(entity_name: str):
 
 
 def create_entity(entity_name: str, payload: dict, *, timeout: int = 30):
-    return _request_json(
+    result = _request_json(
         "POST",
         _entity_collection_url(entity_name),
         headers=api_headers(),
         json_body=payload,
         timeout=timeout,
     )
+    return _unwrap_supabase_response(result)
 
 
 def create_entity_record(entity_name: str, payload: dict, *, timeout: int = 30):
@@ -768,13 +839,14 @@ def create_entity_record(entity_name: str, payload: dict, *, timeout: int = 30):
 
 
 def update_entity(entity_name: str, entity_id: str, payload: dict, *, timeout: int = 30):
-    return _request_json(
-        "PUT",
-        f"{_entity_collection_url(entity_name)}/{entity_id}",
+    result = _request_json(
+        "PATCH",
+        f"{_entity_collection_url(entity_name)}?id=eq.{entity_id}",
         headers=api_headers(),
         json_body=payload,
         timeout=timeout,
     )
+    return _unwrap_supabase_response(result)
 
 
 def _drop_none_values(payload: dict):
@@ -1181,7 +1253,8 @@ def write_investigation_history(*args, **kwargs):
 
 
 def create_bot_job(payload: dict):
-    return _request_json("POST", BOTJOB_URL, headers=api_headers(), json_body=payload, timeout=60)
+    result = _request_json("POST", BOTJOB_URL, headers=api_headers(), json_body=payload, timeout=60)
+    return _unwrap_supabase_response(result)
 
 
 def create_confirmation_job(
@@ -1560,4 +1633,3 @@ def send_alert(service: str, status: str, reason: str, message: str, screenshot_
     }
 
     return _request_json("POST", BOTALERT_URL, headers=api_headers(), json_body=payload, timeout=30)
-

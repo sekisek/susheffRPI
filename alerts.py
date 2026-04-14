@@ -13,10 +13,12 @@ LOGS_DIR = BASE / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 API_KEY = os.getenv("API_KEY", "").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
 DEVICE_NAME = os.getenv("DEVICE_NAME", "").strip() or socket.gethostname()
 
-# Replace this if Base44 shows you a different exact path for BotAlert
-BOT_ALERT_URL = "https://app.base44.com/api/apps/69ad9b8c06689adb44280cf2/entities/BotAlert"
+BOT_ALERT_URL = f"{SUPABASE_URL}/rest/v1/bot_alerts" if SUPABASE_URL else ""
 
 
 def utc_now_iso():
@@ -44,12 +46,14 @@ def send_alert(service: str, status: str, reason: str, message: str, screenshot_
 
     append_local_log(f"{payload['timestamp']} | {service} | {status} | {reason} | {message}")
 
-    if not API_KEY:
-        return {"ok": False, "error": "missing API_KEY", "payload": payload}
+    if not BOT_ALERT_URL:
+        return {"ok": False, "error": "missing SUPABASE_URL", "payload": payload}
 
     headers = {
-        "api_key": API_KEY,
+        "apikey": SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
         "Content-Type": "application/json",
+        "Prefer": "return=representation",
     }
 
     try:
