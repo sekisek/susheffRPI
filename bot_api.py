@@ -1570,4 +1570,66 @@ def submit_bot_evidence(
         payload["execution_actor"] = execution_actor
     if assigned_device is not None:
         payload["assigned_device"] = assigned_device
-    if execution_
+    if execution_path is not None:
+        payload["execution_path"] = execution_path
+    if source_device is not None:
+        payload["source_device"] = source_device
+    if runner is not None:
+        payload["runner"] = runner
+    if device is not None:
+        payload["device"] = device
+    if execution_device is not None:
+        payload["execution_device"] = execution_device
+    if controller_device is not None:
+        payload["controller_device"] = controller_device
+    if client_device is not None:
+        payload["client_device"] = client_device
+    if source_platform is not None:
+        payload["source_platform"] = _trim_text(source_platform, SUBMIT_SOURCE_TEXT_MAX_LEN)
+    if source_creator_name is not None:
+        payload["source_creator_name"] = _trim_text(source_creator_name, SUBMIT_SOURCE_TEXT_MAX_LEN)
+    if source_creator_handle is not None:
+        payload["source_creator_handle"] = _trim_text(source_creator_handle, SUBMIT_SOURCE_HANDLE_MAX_LEN)
+    if source_channel_name is not None:
+        payload["source_channel_name"] = _trim_text(source_channel_name, SUBMIT_SOURCE_TEXT_MAX_LEN)
+    if source_channel_key is not None:
+        payload["source_channel_key"] = _trim_text(source_channel_key, SUBMIT_SOURCE_KEY_MAX_LEN)
+    if source_profile_url is not None:
+        payload["source_profile_url"] = _trim_text(source_profile_url, SUBMIT_SOURCE_URL_MAX_LEN)
+    if source_page_domain is not None:
+        payload["source_page_domain"] = _trim_text(source_page_domain, SUBMIT_SOURCE_DOMAIN_MAX_LEN)
+    if creator_group_key is not None:
+        payload["creator_group_key"] = _trim_text(creator_group_key, SUBMIT_SOURCE_KEY_MAX_LEN)
+    if source_avatar_url is not None:
+        payload["source_avatar_url"] = _trim_text(source_avatar_url, SUBMIT_SOURCE_URL_MAX_LEN)
+    if visual_recipe_image_url is not None:
+        payload["visual_recipe_image_url"] = _trim_text(visual_recipe_image_url, SUBMIT_SOURCE_URL_MAX_LEN)
+    if page_image_url is not None:
+        payload["page_image_url"] = _trim_text(page_image_url, SUBMIT_SOURCE_URL_MAX_LEN)
+    if debug_data is not None:
+        payload["debug_data"] = _fit_debug_data_for_base44(debug_data)
+
+    return _request_json(
+        "POST",
+        SUBMIT_BOT_EVIDENCE_URL,
+        headers=bot_function_headers(),
+        json_body=payload,
+        timeout=120,
+        retries=max(HTTP_RETRY_ATTEMPTS, 4),
+    )
+
+
+def send_alert(service: str, status: str, reason: str, message: str, screenshot_path: str | None = None, extra: dict | None = None):
+    payload = {
+        "service": service,
+        "status": status,
+        "reason": reason,
+        "message": message,
+        "screenshot_path": screenshot_path or "",
+        "timestamp": utc_now_iso(),
+        "device": DEVICE_NAME,
+        "hostname": socket.gethostname(),
+        "extra": extra or {},
+    }
+
+    return _request_json("POST", BOTALERT_URL, headers=api_headers(), json_body=payload, timeout=30)
