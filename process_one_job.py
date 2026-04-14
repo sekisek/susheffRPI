@@ -34,6 +34,7 @@ from bot_api import (
     update_recipe_debug,
     update_recipe_from_job,
     upload_bot_screenshot,
+    warmup_edge_functions,
 )
 
 load_dotenv(Path.home() / "social-bot" / ".env", override=True)
@@ -12529,6 +12530,11 @@ async def run_inline_investigation(
 
 
 async def main():
+    try:
+        warmup_edge_functions()
+    except Exception:
+        pass
+
     platform_allowlist = get_platform_allowlist()
     job = claim_next_job(platform_allowlist=platform_allowlist)
 
@@ -13831,3 +13837,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+                                                                                                                                                                                                                                                             
