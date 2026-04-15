@@ -228,6 +228,10 @@ PHONE_WORKER_SCRIPTS = {
     "tiktok": PHONE_WORKERS_DIR / "tiktok_phone_evidence.sh",
 }
 
+PHONE_SCREENSHOT_CONTENT_GATE_ENABLED = os.getenv("PHONE_SCREENSHOT_CONTENT_GATE_ENABLED", "true").strip().lower() == "true"
+PHONE_SCREENSHOT_CONTENT_GATE_MIN_OCR_LEN = int(os.getenv("PHONE_SCREENSHOT_CONTENT_GATE_MIN_OCR_LEN", "20").strip() or "20")
+PHONE_SCREENSHOT_CONTENT_GATE_MIN_SIGNALS = int(os.getenv("PHONE_SCREENSHOT_CONTENT_GATE_MIN_SIGNALS", "2").strip() or "2")
+
 
 ANALYZER_BUILD_VERSION = os.getenv("ANALYZER_BUILD_VERSION", "pi-analyzer-hotfix-2026-03-25-1").strip() or "pi-analyzer-hotfix-2026-03-25-1"
 INVESTIGATION_PATCH_VERSION = os.getenv("INVESTIGATION_PATCH_VERSION", "investigator-v10-phone-merged-evidence-friendly-2026-04-06").strip() or "investigator-v10-phone-merged-evidence-friendly-2026-04-06"
@@ -8928,6 +8932,85 @@ def ocr_image_text(image_path: str) -> str:
         return ""
 
 
+def extract_expected_handle_from_url(url: str, platform: str) -> str:
+    """Extract the expected creator handle from a social media target URL."""
+    try:
+        parts = [part for part in urlparse(str(url or "")).path.split('/') if part]
+        if platform == "tiktok" and parts and parts[0].startswith('@'):
+            return parts[0].lstrip('@').lower().strip()
+        if platform == "instagram" and parts:
+            candidate = parts[0].lower().strip()
+            if candidate not in SOCIAL_PROFILE_RESERVED_PATHS:
+                return candidate
+        if platform == "youtube" and parts and parts[0].startswith('@'):
+            return parts[0].lstrip('@').lower().strip()
+    except Exception:
+        pass
+    return ""
+
+
+def validate_phone_screenshot_content(
+    ocr_text: str,
+    target_url: str,
+    platform: str,
+) -> dict:
+    """
+    Check if phone screenshot OCR text matches the expected content for the target URL.
+    Returns a dict with gate_passed (bool), reason (str), and diagnostics.
+    If the gate fails, the screenshot should NOT be uploaded as evidence.
+    """
+    result = {
+        "gate_passed": True,
+        "reason": "not_checked",
+        "expected_handle": "",
+        "ocr_text_len": len(ocr_text or ""),
+        "signal_count": 0,
+    }
+
+    if not PHONE_SCREENSHOT_CONTENT_GATE_ENABLED:
+        result["reason"] = "gate_disabled"
+        return result
+
+    ocr_lower = (ocr_text or "").lower()
+    ocr_stripped = ocr_lower.strip()
+
+    # If OCR produced almost nothing, the screenshot is likely black/blank/loading
+    if len(ocr_stripped) < PHONE_SCREENSHOT_CONTENT_GATE_MIN_OCR_LEN:
+        result["gate_passed"] = False
+        result["reason"] = "ocr_text_too_short"
+        return result
+
+    expected_handle = extract_expected_handle_from_url(target_url, platform)
+    result["expected_handle"] = expected_handle
+
+    if not expected_handle:
+        # Can't verify without expected handle — let it through but note it
+        result["reason"] = "no_expected_handle_to_check"
+        return result
+
+    # Primary check: does the handle appear in the OCR text?
+    handle_clean = expected_handle.replace('_', '').replace('.', '')
+    ocr_clean = ocr_stripped.replace('_', '').replace('.', '')
+    if expected_handle in ocr_stripped or handle_clean in ocr_clean:
+        result["reason"] = "handle_found_in_ocr"
+        return result
+
+    # Fallback for TikTok: check for video-page UI signals even if handle OCR failed
+    # (handle might be partially occluded or OCR mangled it)
+    if platform == "tiktok":
+        tiktok_signals = ["follow", "like", "comment", "share", "bookmark", "more"]
+        signal_count = sum(1 for s in tiktok_signals if s in ocr_stripped)
+        result["signal_count"] = signal_count
+        if signal_count >= PHONE_SCREENSHOT_CONTENT_GATE_MIN_SIGNALS:
+            result["reason"] = f"tiktok_video_ui_signals_found_{signal_count}"
+            return result
+
+    # Gate fails: screenshot likely shows wrong content
+    result["gate_passed"] = False
+    result["reason"] = "handle_not_found_in_ocr"
+    return result
+
+
 def run_phone_worker_job(job_id: str, platform: str, target_url: str) -> dict:
     script_path = PHONE_WORKER_SCRIPTS.get(platform)
 
@@ -12729,8 +12812,42 @@ async def main():
                 },
             )
 
+            # --- Phone screenshot content gate ---
+            # Check if the phone screenshot actually shows the target video
+            # before uploading it (prevents stale/wrong screenshots from becoming thumbnails)
+            phone_content_gate = validate_phone_screenshot_content(
+                ocr_text=evidence.get("visible_text_before_expand") or "",
+                target_url=target_url,
+                platform=platform,
+            )
+            phone_screenshot_upload_allowed = phone_content_gate.get("gate_passed", True)
+
+            if not phone_screenshot_upload_allowed:
+                append_job_debug_log(
+                    job_id,
+                    (
+                        f"Phone screenshot content gate FAILED — skipping screenshot upload. "
+                        f"reason={phone_content_gate.get('reason')} "
+                        f"expected_handle={phone_content_gate.get('expected_handle')} "
+                        f"ocr_text_len={phone_content_gate.get('ocr_text_len')} "
+                        f"signal_count={phone_content_gate.get('signal_count')}"
+                    ),
+                    debug_last_step="phone_screenshot_content_gate_failed",
+                    debug_data=phone_content_gate,
+                )
+            else:
+                append_job_debug_log(
+                    job_id,
+                    (
+                        f"Phone screenshot content gate passed. "
+                        f"reason={phone_content_gate.get('reason')} "
+                        f"expected_handle={phone_content_gate.get('expected_handle')}"
+                    ),
+                    debug_last_step="phone_screenshot_content_gate_passed",
+                )
+
             description_screenshot_url = ""
-            if evidence.get("description_screenshot_path"):
+            if phone_screenshot_upload_allowed and evidence.get("description_screenshot_path"):
                 description_upload = upload_bot_screenshot(
                     job_id=job_id,
                     image_path=evidence["description_screenshot_path"],
@@ -12745,7 +12862,7 @@ async def main():
 
             screenshot_url = ""
             primary_screenshot_path = evidence.get("primary_screenshot_path") or ""
-            if primary_screenshot_path and Path(primary_screenshot_path).exists():
+            if phone_screenshot_upload_allowed and primary_screenshot_path and Path(primary_screenshot_path).exists():
                 upload_result = upload_bot_screenshot(
                     job_id=job_id,
                     image_path=primary_screenshot_path,
