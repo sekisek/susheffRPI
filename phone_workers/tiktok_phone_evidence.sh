@@ -285,6 +285,11 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
   REMOTE_XML="/sdcard/${JOB_ID}_01_open_attempt${attempt}.xml"
   LOCAL_XML="$OUT_DIR/01_open_attempt${attempt}.xml"
 
+  # Pause TikTok video so uiautomator can reach idle state for XML dump
+  log_step "PAUSE_VIDEO attempt=$attempt"
+  adb_safe shell input tap 540 1200 || true
+  sleep 1
+
   log_step "Capture open screenshot attempt=$attempt"
   if ! capture_screen "$REMOTE_OPEN" "$LOCAL_OPEN"; then
     log_step "CAPTURE_OPEN_FAILED attempt=$attempt"
