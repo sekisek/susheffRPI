@@ -9043,6 +9043,18 @@ def run_phone_worker_job(job_id: str, platform: str, target_url: str) -> dict:
 
     visible_before = ocr_image_text(str(primary_path))
     visible_after = ocr_image_text(str(description_path)) if description_path.exists() else ""
+
+    # OCR any scroll-capture screenshots (03_scroll1.png, 03_scroll2.png, etc.)
+    scroll_texts = []
+    for scroll_idx in range(1, int(os.getenv("TIKTOK_PHONE_SCROLL_COUNT", "2").strip() or "2") + 1):
+        scroll_path = bundle_dir / f"03_scroll{scroll_idx}.png"
+        if scroll_path.exists():
+            scroll_text = ocr_image_text(str(scroll_path))
+            if scroll_text.strip():
+                scroll_texts.append(scroll_text)
+    if scroll_texts:
+        visible_after = combine_text_blocks([visible_after] + scroll_texts)
+
     media_type_guess = "video" if platform in {"tiktok", "youtube"} else "post"
 
     return {

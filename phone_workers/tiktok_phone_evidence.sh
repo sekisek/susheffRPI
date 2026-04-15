@@ -424,6 +424,34 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
   sleep "$RETRY_SLEEP_SECONDS"
 done
 
+# --- Post-expand scroll capture ---
+# After successful expansion, scroll down to capture content below the fold
+# (long captions with ingredients + instructions often extend past one screen)
+SCROLL_AFTER_EXPAND="${TIKTOK_PHONE_SCROLL_AFTER_EXPAND:-true}"
+SCROLL_COUNT="${TIKTOK_PHONE_SCROLL_COUNT:-2}"
+SCROLL_PAUSE_SECONDS="${TIKTOK_PHONE_SCROLL_PAUSE_SECONDS:-2}"
+
+if [[ "$SUCCESS" == "yes" && "$SCROLL_AFTER_EXPAND" == "true" ]]; then
+  log_step "POST_EXPAND_SCROLL starting scroll_count=$SCROLL_COUNT"
+  for scroll_idx in $(seq 1 "$SCROLL_COUNT"); do
+    # Swipe up to scroll the expanded caption down
+    adb_safe shell input swipe 540 1800 540 800 300 || {
+      log_step "SCROLL_SWIPE_FAILED scroll=$scroll_idx"
+      continue
+    }
+    sleep "$SCROLL_PAUSE_SECONDS"
+
+    SCROLL_REMOTE="/sdcard/${JOB_ID}_03_scroll${scroll_idx}.png"
+    SCROLL_LOCAL="$OUT_DIR/03_scroll${scroll_idx}.png"
+    if capture_screen "$SCROLL_REMOTE" "$SCROLL_LOCAL"; then
+      log_step "SCROLL_CAPTURED scroll=$scroll_idx path=$SCROLL_LOCAL"
+    else
+      log_step "SCROLL_CAPTURE_FAILED scroll=$scroll_idx"
+    fi
+  done
+  log_step "POST_EXPAND_SCROLL done"
+fi
+
 if [[ -z "$SUCCESS" ]]; then
   log_step "No successful caption expand after retries."
   if [[ -n "$LAST_OPEN" && -f "$LAST_OPEN" ]]; then
