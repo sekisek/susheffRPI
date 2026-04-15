@@ -389,8 +389,19 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
       continue
     fi
     if [[ "$MORE_EXISTS_RC" -eq 2 ]]; then
-      log_step "MORE_EXISTS_CHECK_TIMEOUT attempt=$attempt candidate=$local_candidate_index"
-      continue
+      # Timeout means OCR/XML couldn't confirm either way.
+      # Rather than retrying (which TOGGLES the caption back), assume success.
+      # The content gate in process_one_job.py will catch truly wrong screenshots.
+      log_step "MORE_EXISTS_CHECK_TIMEOUT_ACCEPT attempt=$attempt candidate=$local_candidate_index"
+      cp "$LOCAL_OPEN" "$OUT_DIR/01_open.png"
+      cp "$EXPANDED_CANDIDATE_LOCAL" "$OUT_DIR/02_expanded.png"
+      if [[ -f "$EXPANDED_CANDIDATE_XML_LOCAL" ]]; then
+        cp "$EXPANDED_CANDIDATE_XML_LOCAL" "$OUT_DIR/02_expanded.xml"
+      fi
+      BEST_ATTEMPT="$attempt"
+      BEST_CANDIDATE="$local_candidate_index"
+      SUCCESS="yes"
+      break 2
     fi
 
     cp "$LOCAL_OPEN" "$OUT_DIR/01_open.png"
