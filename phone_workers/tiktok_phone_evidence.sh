@@ -24,6 +24,12 @@ TAP_SETTLE_SECONDS="${TIKTOK_PHONE_TAP_SETTLE_SECONDS:-2}"
 POST_BACK_SETTLE_SECONDS="${TIKTOK_PHONE_POST_BACK_SETTLE_SECONDS:-2}"
 RETRY_SLEEP_SECONDS="${TIKTOK_PHONE_RETRY_SLEEP_SECONDS:-1}"
 APP_PACKAGE="com.zhiliaoapp.musically"
+FORCE_STOP_BEFORE_OPEN="${TIKTOK_PHONE_FORCE_STOP_BEFORE_OPEN:-true}"
+VERIFY_OPEN_ENABLED="${TIKTOK_PHONE_VERIFY_OPEN_ENABLED:-true}"
+VERIFY_OPEN_MIN_SIGNALS="${TIKTOK_PHONE_VERIFY_OPEN_MIN_SIGNALS:-2}"
+
+# Extract expected creator handle from URL (e.g. chef_natalie_ from /@chef_natalie_/video/...)
+EXPECTED_HANDLE="$(echo "$CLEAN_URL" | sed -n 's|.*/@\([^/]*\)/.*|\1|p' | tr '[:upper:]' '[:lower:]')"
 
 REMOTE_EXPANDED="/sdcard/${JOB_ID}_02_expanded.png"
 REMOTE_EXPANDED_XML="/sdcard/${JOB_ID}_02_expanded.xml"
@@ -73,6 +79,52 @@ dump_ui() {
   adb_safe pull "$remote_file" "$local_file" >/dev/null || return 1
   adb_safe shell rm -f "$remote_file" >/dev/null || true
   return 0
+}
+
+force_stop_tiktok() {
+  log_step "FORCE_STOP_TIKTOK package=$APP_PACKAGE"
+  adb_safe shell am force-stop "$APP_PACKAGE" || true
+  sleep 1
+}
+
+verify_open_content() {
+  local xml_path="${1:-}"
+
+  if [[ "$VERIFY_OPEN_ENABLED" != "true" ]]; then
+    log_step "VERIFY_OPEN_SKIP reason=disabled"
+    return 0
+  fi
+
+  if [[ -z "$xml_path" || ! -f "$xml_path" ]]; then
+    log_step "VERIFY_OPEN_SKIP reason=no_xml_available"
+    return 0
+  fi
+
+  # Primary check: does the expected creator handle appear in the UI XML?
+  if [[ -n "$EXPECTED_HANDLE" ]]; then
+    if grep -qiF "$EXPECTED_HANDLE" "$xml_path" 2>/dev/null; then
+      log_step "VERIFY_OPEN_OK method=xml_handle_match handle=$EXPECTED_HANDLE"
+      return 0
+    fi
+  fi
+
+  # Fallback: count TikTok video-page UI signals in the XML
+  local signal_count=0
+  local signals_found=""
+  for signal in "com.ss.android.ugc.aweme" "like" "comment" "share" "follow" "music"; do
+    if grep -qiF "$signal" "$xml_path" 2>/dev/null; then
+      signal_count=$((signal_count + 1))
+      signals_found="${signals_found}${signal},"
+    fi
+  done
+
+  if [[ "$signal_count" -ge "$VERIFY_OPEN_MIN_SIGNALS" ]]; then
+    log_step "VERIFY_OPEN_OK method=xml_ui_signals signal_count=$signal_count signals=$signals_found"
+    return 0
+  fi
+
+  log_step "VERIFY_OPEN_FAILED expected_handle=${EXPECTED_HANDLE:-none} signal_count=$signal_count signals=$signals_found"
+  return 1
 }
 
 get_focus() {
@@ -170,19 +222,54 @@ capture_open_probe() {
 }
 
 log_step "Opening: $CLEAN_URL"
+if [[ -n "$EXPECTED_HANDLE" ]]; then
+  log_step "EXPECTED_HANDLE=$EXPECTED_HANDLE"
+else
+  log_step "EXPECTED_HANDLE=none (could not extract from URL)"
+fi
 OPEN_OK=""
 for open_attempt in $(seq 1 "$OPEN_ATTEMPTS"); do
-  if open_tiktok_url "$open_attempt"; then
+  # Force-stop TikTok before each attempt to ensure the deep link actually navigates
+  # instead of being silently ignored by an already-running instance
+  if [[ "$FORCE_STOP_BEFORE_OPEN" == "true" ]]; then
+    force_stop_tiktok
+  fi
+
+  if ! open_tiktok_url "$open_attempt"; then
+    sleep "$RETRY_SLEEP_SECONDS"
+    continue
+  fi
+
+  sleep "$OPEN_WAIT_SECONDS"
+  capture_open_probe "$open_attempt" || true
+
+  # Dump UI XML and verify the screen shows the target video
+  VERIFY_XML_REMOTE="/sdcard/${JOB_ID}_00_verify_attempt${open_attempt}.xml"
+  VERIFY_XML_LOCAL="$OUT_DIR/00_verify_attempt${open_attempt}.xml"
+  if dump_ui "$VERIFY_XML_REMOTE" "$VERIFY_XML_LOCAL"; then
+    log_step "VERIFY_UI_DUMP_OK attempt=$open_attempt"
+  else
+    log_step "VERIFY_UI_DUMP_FAILED attempt=$open_attempt"
+    rm -f "$VERIFY_XML_LOCAL" >/dev/null 2>&1 || true
+    VERIFY_XML_LOCAL=""
+  fi
+
+  if verify_open_content "$VERIFY_XML_LOCAL"; then
     OPEN_OK="yes"
-    sleep "$OPEN_WAIT_SECONDS"
-    capture_open_probe "$open_attempt" || true
+    # Make sure the verified probe is the canonical 01_open.png
+    local_probe="$OUT_DIR/00_open_probe_attempt${open_attempt}.png"
+    if [[ -f "$local_probe" ]]; then
+      cp "$local_probe" "$OUT_DIR/01_open.png" || true
+    fi
     break
   fi
+
+  log_step "OPEN_CONTENT_VERIFY_FAILED attempt=$open_attempt — will retry"
   sleep "$RETRY_SLEEP_SECONDS"
 done
 
 if [[ -z "$OPEN_OK" ]]; then
-  log_step "OPEN_ALL_ATTEMPTS_FAILED url=$CLEAN_URL"
+  log_step "OPEN_ALL_ATTEMPTS_FAILED url=$CLEAN_URL (includes verification failures)"
   exit 1
 fi
 
