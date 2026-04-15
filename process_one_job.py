@@ -9024,7 +9024,7 @@ def run_phone_worker_job(job_id: str, platform: str, target_url: str) -> dict:
         capture_output=True,
         text=True,
         cwd=str(PHONE_WORKERS_DIR),
-        timeout=180,
+        timeout=int(os.getenv("PHONE_WORKER_TIMEOUT_SECONDS", "300").strip() or "300"),
     )
 
     if result.returncode != 0:
