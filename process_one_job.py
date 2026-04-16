@@ -8953,6 +8953,7 @@ def validate_phone_screenshot_content(
     ocr_text: str,
     target_url: str,
     platform: str,
+    evidence_expanded: bool = False,
 ) -> dict:
     """
     Check if phone screenshot OCR text matches the expected content for the target URL.
@@ -8969,6 +8970,12 @@ def validate_phone_screenshot_content(
 
     if not PHONE_SCREENSHOT_CONTENT_GATE_ENABLED:
         result["reason"] = "gate_disabled"
+        return result
+
+    # If caption expansion succeeded, the phone was on the right video —
+    # auto-pass the gate. You can't expand a "More" button on a stale screen.
+    if evidence_expanded:
+        result["reason"] = "expand_success_bypasses_gate"
         return result
 
     ocr_lower = (ocr_text or "").lower()
@@ -12836,6 +12843,7 @@ async def main():
                 ocr_text=evidence.get("visible_text_before_expand") or "",
                 target_url=target_url,
                 platform=platform,
+                evidence_expanded=bool(evidence.get("caption_expanded")),
             )
             phone_screenshot_upload_allowed = phone_content_gate.get("gate_passed", True)
 
