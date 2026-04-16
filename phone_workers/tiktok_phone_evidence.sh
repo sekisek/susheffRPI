@@ -433,17 +433,17 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
 done
 
 # --- Post-expand scroll capture ---
-# After successful expansion, scroll down until we reach the bottom.
-# We detect "bottom reached" when a new screenshot is nearly the same
-# file size as the previous one (content stopped changing).
+# After successful expansion, scroll down a fixed number of times and capture
+# each screenshot. The Python side OCRs all of them and dedupes in text space.
+# File-size-based bottom detection is unreliable because PNG compression
+# produces similar sizes for screenshots with the same video background even
+# when the caption text differs significantly.
 SCROLL_AFTER_EXPAND="${TIKTOK_PHONE_SCROLL_AFTER_EXPAND:-true}"
-SCROLL_MAX="${TIKTOK_PHONE_SCROLL_MAX:-6}"
+SCROLL_MAX="${TIKTOK_PHONE_SCROLL_MAX:-4}"
 SCROLL_PAUSE_SECONDS="${TIKTOK_PHONE_SCROLL_PAUSE_SECONDS:-2}"
-SCROLL_SAME_THRESHOLD="${TIKTOK_PHONE_SCROLL_SAME_THRESHOLD:-5}"
 
 if [[ "$SUCCESS" == "yes" && "$SCROLL_AFTER_EXPAND" == "true" ]]; then
   log_step "POST_EXPAND_SCROLL starting max=$SCROLL_MAX"
-  PREV_SCROLL_SIZE=0
   for scroll_idx in $(seq 1 "$SCROLL_MAX"); do
     adb_safe shell input swipe 540 1800 540 800 300 || {
       log_step "SCROLL_SWIPE_FAILED scroll=$scroll_idx"
@@ -458,24 +458,6 @@ if [[ "$SUCCESS" == "yes" && "$SCROLL_AFTER_EXPAND" == "true" ]]; then
       break
     fi
     log_step "SCROLL_CAPTURED scroll=$scroll_idx path=$SCROLL_LOCAL"
-
-    # Compare file size with previous scroll to detect bottom
-    CURR_SIZE=$(stat -c%s "$SCROLL_LOCAL" 2>/dev/null || echo 0)
-    if [[ "$PREV_SCROLL_SIZE" -gt 0 && "$CURR_SIZE" -gt 0 ]]; then
-      if [[ "$PREV_SCROLL_SIZE" -gt "$CURR_SIZE" ]]; then
-        DIFF=$(( PREV_SCROLL_SIZE - CURR_SIZE ))
-      else
-        DIFF=$(( CURR_SIZE - PREV_SCROLL_SIZE ))
-      fi
-      # Calculate percentage difference
-      PCT=$(( DIFF * 100 / PREV_SCROLL_SIZE ))
-      if [[ "$PCT" -le "$SCROLL_SAME_THRESHOLD" ]]; then
-        log_step "SCROLL_BOTTOM_REACHED scroll=$scroll_idx pct_diff=$PCT prev_size=$PREV_SCROLL_SIZE curr_size=$CURR_SIZE"
-        break
-      fi
-      log_step "SCROLL_CONTENT_CHANGED scroll=$scroll_idx pct_diff=$PCT"
-    fi
-    PREV_SCROLL_SIZE="$CURR_SIZE"
   done
   log_step "POST_EXPAND_SCROLL done"
 fi
