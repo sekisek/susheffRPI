@@ -403,6 +403,16 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
       if [[ -f "$EXPANDED_CANDIDATE_XML_LOCAL" ]]; then
         cp "$EXPANDED_CANDIDATE_XML_LOCAL" "$OUT_DIR/02_expanded.xml"
       fi
+      # Resume video playback before final capture so screen isn't dimmed
+      log_step "RESUME_VIDEO attempt=$attempt candidate=$local_candidate_index"
+      adb_safe shell input tap 540 1200 || true
+      sleep 2
+
+      # Re-capture the expanded screenshot with normal brightness
+      log_step "RECAPTURE_EXPANDED attempt=$attempt candidate=$local_candidate_index"
+      capture_screen "$EXPANDED_CANDIDATE_REMOTE" "$EXPANDED_CANDIDATE_LOCAL" || true
+      cp "$EXPANDED_CANDIDATE_LOCAL" "$OUT_DIR/02_expanded.png" || true
+
       BEST_ATTEMPT="$attempt"
       BEST_CANDIDATE="$local_candidate_index"
       SUCCESS="yes"
@@ -414,6 +424,16 @@ for attempt in $(seq 1 "$ATTEMPT_COUNT"); do
     if [[ -f "$EXPANDED_CANDIDATE_XML_LOCAL" ]]; then
       cp "$EXPANDED_CANDIDATE_XML_LOCAL" "$OUT_DIR/02_expanded.xml"
     fi
+
+    # Resume video playback before final capture so screen isn't dimmed
+    log_step "RESUME_VIDEO attempt=$attempt candidate=$local_candidate_index"
+    adb_safe shell input tap 540 1200 || true
+    sleep 2
+
+    # Re-capture the expanded screenshot with normal brightness
+    log_step "RECAPTURE_EXPANDED attempt=$attempt candidate=$local_candidate_index"
+    capture_screen "$EXPANDED_CANDIDATE_REMOTE" "$EXPANDED_CANDIDATE_LOCAL" || true
+    cp "$EXPANDED_CANDIDATE_LOCAL" "$OUT_DIR/02_expanded.png" || true
 
     BEST_ATTEMPT="$attempt"
     BEST_CANDIDATE="$local_candidate_index"
