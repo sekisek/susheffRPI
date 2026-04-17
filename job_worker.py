@@ -45,6 +45,10 @@ def main():
             if "NO_PENDING_JOBS" in combined:
                 break
 
+            if code != 0:
+                print(f"JOB_WORKER_RUN_FAILED exit_code={code}", flush=True)
+                break
+
             jobs_processed += 1
 
             if jobs_processed < MAX_JOBS_PER_CYCLE:
