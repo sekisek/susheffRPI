@@ -146,23 +146,10 @@ async def main():
         print(f"REASON={reason}")
         return
 
-    first_alert = send_alert(
-        service="instagram",
-        status="failure",
-        reason=reason,
-        message="Instagram login/session check failed on first attempt.",
-        screenshot_path=screenshot_path,
-        extra={
-            "check": "instagram_login",
-            "attempt": 1,
-            "profile_key": profile_key_for("instagram", COLLECTOR_PROFILE_ID),
-        },
-    )
-
     print("INSTAGRAM_STATUS=NOT_LOGGED_IN")
     print(f"REASON={reason}")
     print(f"SCREENSHOT={screenshot_path}")
-    print(f"ALERT_RESULT_1={first_alert}")
+    print("ALERT_RESULT_1=skipped_first_attempt")
     print("INSTAGRAM_RETRYING=1")
 
     await asyncio.sleep(5)
@@ -170,21 +157,9 @@ async def main():
     ok2, reason2, screenshot_path2 = await run_check_once()
 
     if ok2:
-        recovery_alert = send_alert(
-            service="instagram",
-            status="recovered",
-            reason="recovered_after_retry",
-            message="Instagram check failed first, but recovered on retry.",
-            screenshot_path=screenshot_path2,
-            extra={
-                "check": "instagram_login",
-                "attempt": 2,
-                "profile_key": profile_key_for("instagram", COLLECTOR_PROFILE_ID),
-            },
-        )
         print("INSTAGRAM_STATUS=RECOVERED_AFTER_RETRY")
         print(f"REASON_2={reason2}")
-        print(f"ALERT_RESULT_RECOVERY={recovery_alert}")
+        print("ALERT_RESULT_RECOVERY=not_sent_no_final_failure")
         return
 
     second_alert = send_alert(
