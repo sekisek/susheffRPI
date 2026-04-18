@@ -3,7 +3,8 @@ import json
 import os
 import socket
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -115,6 +116,9 @@ RETRYABLE_STATUS_CODES = {405, 408, 425, 429, 500, 502, 503, 504}
 
 BOT_API_PATCH_VERSION = os.getenv("BOT_API_PATCH_VERSION", "bot_api-v14-debugdata-guard-2026-04-07").strip() or "bot_api-v14-debugdata-guard-2026-04-07"
 INVESTIGATION_HISTORY_WRITER_VERSION = os.getenv("INVESTIGATION_HISTORY_WRITER_VERSION", "history-writer-v13-trace-2026-04-05").strip() or "history-writer-v13-trace-2026-04-05"
+ALERT_FAILURE_COOLDOWN_MINUTES = int(os.getenv("ALERT_FAILURE_COOLDOWN_MINUTES", "30") or "30")
+ALERT_CRITICAL_COOLDOWN_MINUTES = int(os.getenv("ALERT_CRITICAL_COOLDOWN_MINUTES", "30") or "30")
+ALERT_LOG_DIR = Path.home() / "social-bot" / "logs"
 
 
 def _parse_bool_env(name: str, default: bool) -> bool:
@@ -192,6 +196,54 @@ def get_current_collector_identity():
 
 def utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def append_local_alert_log(line: str):
+    try:
+        ALERT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = ALERT_LOG_DIR / "alerts.log"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _parse_alert_timestamp(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _cooldown_minutes_for_status(status: str) -> int:
+    normalized = str(status or "").strip().lower()
+    if normalized == "failure":
+        return max(ALERT_FAILURE_COOLDOWN_MINUTES, 0)
+    if normalized == "critical":
+        return max(ALERT_CRITICAL_COOLDOWN_MINUTES, 0)
+    return 0
+
+
+def _latest_matching_alert(service: str, status: str, reason: str, device: str, headers: dict) -> dict | None:
+    query_params = {
+        "select": "id,timestamp,created_at",
+        "service": f"eq.{service}",
+        "status": f"eq.{status}",
+        "reason": f"eq.{reason}",
+        "device": f"eq.{device}",
+        "order": "timestamp.desc.nullslast,created_at.desc.nullslast,id.desc",
+        "limit": "1",
+    }
+    response = requests.get(BOTALERT_URL, headers=headers, params=query_params, timeout=20)
+    if not response.ok:
+        raise RuntimeError(f"cooldown lookup failed {response.status_code}: {_response_text_preview(response)}")
+    result = response.json()
+    if isinstance(result, list) and result:
+        return result[0]
+    return None
 
 
 def _checked_json_response(resp):
@@ -1631,5 +1683,36 @@ def send_alert(service: str, status: str, reason: str, message: str, screenshot_
         "hostname": socket.gethostname(),
         "extra": extra or {},
     }
+
+    append_local_alert_log(f"{payload['timestamp']} | {service} | {status} | {reason} | {message}")
+    cooldown_minutes = _cooldown_minutes_for_status(status)
+    if cooldown_minutes > 0:
+        try:
+            headers = api_headers()
+            latest = _latest_matching_alert(service, status, reason, DEVICE_NAME, headers)
+            latest_ts = _parse_alert_timestamp((latest or {}).get("timestamp") or (latest or {}).get("created_at"))
+            if latest_ts and latest_ts >= datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes):
+                append_local_alert_log(
+                    f"{utc_now_iso()} | ALERT_SUPPRESSED | {service} | {status} | {reason} | cooldown={cooldown_minutes}m"
+                )
+                return {
+                    "ok": True,
+                    "suppressed": True,
+                    "payload": payload,
+                    "suppression": {
+                        "cooldown_minutes": cooldown_minutes,
+                        "latest_alert_timestamp": latest_ts.isoformat(),
+                        "key": {
+                            "service": service,
+                            "status": status,
+                            "reason": reason,
+                            "device": DEVICE_NAME,
+                        },
+                    },
+                }
+        except Exception as e:
+            append_local_alert_log(
+                f"{utc_now_iso()} | ALERT_SUPPRESSION_CHECK_FAILED | {service} | {status} | {reason} | {type(e).__name__}: {e}"
+            )
 
     return _request_json("POST", BOTALERT_URL, headers=api_headers(), json_body=payload, timeout=30)

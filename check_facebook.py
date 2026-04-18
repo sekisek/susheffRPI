@@ -136,19 +136,10 @@ async def main():
         print(f"REASON={reason}")
         return
 
-    first_alert = send_alert(
-        service="facebook",
-        status="failure",
-        reason=reason,
-        message="Facebook login/session check failed on first attempt.",
-        screenshot_path=screenshot_path,
-        extra={"check": "facebook_login", "attempt": 1, "profile_key": PROFILE_KEY},
-    )
-
     print("FACEBOOK_STATUS=NOT_LOGGED_IN")
     print(f"REASON={reason}")
     print(f"SCREENSHOT={screenshot_path}")
-    print(f"ALERT_RESULT_1={first_alert}")
+    print("ALERT_RESULT_1=skipped_first_attempt")
     print("FACEBOOK_RETRYING=1")
 
     await asyncio.sleep(5)
@@ -156,16 +147,8 @@ async def main():
     ok2, reason2, screenshot_path2 = await run_check_once()
 
     if ok2:
-        recovery_alert = send_alert(
-            service="facebook",
-            status="recovered",
-            reason="recovered_after_retry",
-            message="Facebook check failed first, but recovered on retry.",
-            screenshot_path=screenshot_path2,
-            extra={"check": "facebook_login", "attempt": 2, "profile_key": PROFILE_KEY},
-        )
         print("FACEBOOK_STATUS=RECOVERED_AFTER_RETRY")
-        print(f"ALERT_RESULT_RECOVERY={recovery_alert}")
+        print("ALERT_RESULT_RECOVERY=not_sent_no_final_failure")
         return
 
     second_alert = send_alert(
